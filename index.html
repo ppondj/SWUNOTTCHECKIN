@@ -656,6 +656,24 @@ const MAIL_BODY = `เรียน {ชื่อ} (รหัสนิสิต {
 
 อีเมลฉบับนี้ส่งอัตโนมัติจากระบบ ${APP.code} กรุณาอย่าตอบกลับ`;
 const GAS_CODE = "/**\n * MEDSWU-QRCA Mailer — Google Apps Script\n * ส่งอีเมลแจ้งเตือนนิสิตที่ยังไม่เช็คชื่อ จากบัญชี Google ของอาจารย์\n *\n * วิธีติดตั้ง (ทำครั้งเดียว)\n * 1. ไปที่ https://script.google.com → New project → วางโค้ดนี้แทนของเดิมทั้งหมด\n * 2. แก้ TOKEN ด้านล่างเป็นรหัสลับของท่านเอง (ตัวอักษรอังกฤษ/ตัวเลข อย่างน้อย 16 ตัว)\n * 3. Deploy → New deployment → Select type: Web app\n *      Execute as: Me (บัญชีของอาจารย์)\n *      Who has access: Anyone\n *    → Deploy → อนุญาตสิทธิ์ (Authorize) → คัดลอก Web app URL (ลงท้ายด้วย /exec)\n * 4. ในโปรแกรม MEDSWU-QRCA → ตั้งค่า → อีเมลแจ้งเตือน → วาง URL และ TOKEN เดียวกัน → ส่งอีเมลทดสอบ\n *\n * โควตา: บัญชี Google Workspace (เช่น @g.swu.ac.th) ประมาณ 1,500 ผู้รับ/วัน · Gmail ทั่วไป 100 ผู้รับ/วัน\n */\nconst TOKEN = 'CHANGE-ME-to-a-long-secret';\nconst MAX_PER_CALL = 300;\n\nfunction doPost(e) {\n  let d;\n  try { d = JSON.parse(e.postData.contents); } catch (err) { return out_({ ok: false, error: 'bad request' }); }\n  if (!d || d.token !== TOKEN) return out_({ ok: false, error: 'TOKEN ไม่ถูกต้อง' });\n  if (d.action === 'ping') return out_({ ok: true, quota: MailApp.getRemainingDailyQuota() });\n  if (d.action !== 'send') return out_({ ok: false, error: 'unknown action' });\n\n  const msgs = (d.messages || []).slice(0, MAX_PER_CALL);\n  let sent = 0; const failed = [];\n  msgs.forEach(function (m) {\n    try {\n      if (!/^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(m.to)) throw new Error('อีเมลไม่ถูกต้อง');\n      MailApp.sendEmail({ to: m.to, subject: String(m.subject).slice(0, 250), body: String(m.body), name: d.senderName || 'MEDSWU-QRCA', noReply: false });\n      sent++;\n    } catch (err) { failed.push({ to: m.to, error: String(err.message || err) }); }\n  });\n  log_(d.senderName, sent, failed.length);\n  return out_({ ok: true, sent: sent, failed: failed, quota: MailApp.getRemainingDailyQuota() });\n}\n\nfunction doGet() { return out_({ ok: true, app: 'MEDSWU-QRCA Mailer' }); }\n\nfunction out_(o) {\n  return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);\n}\n\nfunction log_(name, sent, failed) {\n  try {\n    const p = PropertiesService.getScriptProperties();\n    const lg = JSON.parse(p.getProperty('log') || '[]');\n    lg.push([new Date().toISOString(), name, sent, failed]);\n    p.setProperty('log', JSON.stringify(lg.slice(-200)));\n  } catch (e) {}\n}\n";
+const INV_SUBJ = '[{รหัสวิชา}] ลงทะเบียนมือถือสำหรับเช็คชื่อเข้าเรียน';
+const INV_BODY = `เรียน {ชื่อ} (รหัสนิสิต {รหัสนิสิต})
+
+รายวิชา {รหัสวิชา} {รายวิชา} ใช้ระบบเช็คชื่อเข้าเรียนด้วย QR Code
+กรุณาลงทะเบียนมือถือของท่านก่อนคาบเรียนแรก ดังนี้
+
+1. เปิดอีเมลฉบับนี้บนมือถือที่จะใช้เช็คชื่อ แล้วกดลิงก์ด้านล่าง
+{ลิงก์}
+
+2. เมื่อขึ้นหน้า QR พร้อมชื่อของท่าน ให้กด “เพิ่มไปยังหน้าจอโฮม” (Add to Home Screen)
+3. ในห้องเรียน เปิดหน้านี้แล้วยื่น QR ให้กล้องที่จุดเช็คชื่อ
+
+ข้อควรทราบ
+- ลิงก์นี้เป็นของท่านคนเดียว ห้ามส่งต่อ มือถือที่สแกนเช็คชื่อครั้งแรกจะถูกผูกกับท่าน และมือถือ 1 เครื่องใช้ได้กับนิสิต 1 คน
+- ระบบบันทึกภาพผู้สแกนทุกครั้งเพื่อยืนยันการเข้าเรียน
+- หากเปลี่ยนมือถือหรือเปิดลิงก์ไม่ได้ กรุณาแจ้งอาจารย์
+
+อีเมลฉบับนี้ส่งอัตโนมัติจากระบบ ${APP.code} กรุณาอย่าตอบกลับ`;
 const mailAfter = s => s.mailAfter ?? course4(s)?.mailAfter ?? 15;
 const course4 = s => S.courses.find(c => c.id === s.cid);
 const mailEnabled = s => !!(S.meta.gasUrl && course4(s)?.mailOn && !s.noMail);
@@ -692,6 +710,24 @@ const Mailer = {
       return s.mail;
     } catch (e){ return {ok:false, err:String(e.message||e)}; }
     finally { this.busy = false; }
+  },
+  /* ส่งลิงก์ลงทะเบียนเครื่องทางอีเมล — ทีละ 40 ฉบับ เพื่อไม่ให้ Apps Script หมดเวลา */
+  async invite(crs, list, onProgress){
+    const url = baseUrl(); let sent = 0; const failed = []; let unconfirmed = false;
+    for (let i = 0; i < list.length; i += 40){
+      const part = list.slice(i, i + 40);
+      const msgs = part.map(st => { const o = {'ชื่อ':st.name, 'รหัสนิสิต':st.sid, 'รายวิชา':crs.name, 'รหัสวิชา':crs.code, 'ลิงก์': url + '#e=' + Proto.enrollToken(crs, st)};
+        return {to: st.email, subject: fillTpl(crs.invSubj || INV_SUBJ, o), body: fillTpl(crs.invBody || INV_BODY, o)}; });
+      let r; try { r = await this.post({action:'send', senderName:`${crs.code} ${crs.name}`, messages: msgs}); } catch (e){ r = {ok:false, error:String(e.message||e)}; }
+      if (!r.ok){ failed.push(...part.map(st => ({to: st.email, error: r.error || 'ส่งไม่สำเร็จ'}))); onProgress?.(i + part.length, list.length); continue; }
+      if (r.unconfirmed) unconfirmed = true;
+      const bad = new Set((r.failed || []).map(f => f.to)); failed.push(...(r.failed || []));
+      const now = Date.now();
+      for (const st of part) if (!bad.has(st.email)){ st.invAt = now; st.invVer = st.ver; st.invCount = (st.invCount || 0) + 1; sent++; }
+      await DB.putMany('students', part);
+      onProgress?.(i + part.length, list.length);
+    }
+    return {sent, failed, unconfirmed};
   },
   async test(to){ return this.post({action:'send', senderName: APP.code, messages:[{to, subject:`ทดสอบการส่งอีเมลจาก ${APP.code}`, body:'หากได้รับอีเมลนี้ แสดงว่าการเชื่อมต่อ Google Apps Script ใช้งานได้'}]}); },
 };
@@ -928,16 +964,16 @@ const Admin = {
       ${!url ? `<div class="notice err">ยังไม่ได้ตั้ง <b>URL ของหน้าเว็บที่เผยแพร่</b> (เช่น https://xxx.github.io/qrca/) — ลิงก์ลงทะเบียนต้องชี้ไปยังหน้าเว็บที่นิสิตเปิดได้ ตั้งได้ที่แท็บ “ตั้งค่า”</div>` : ''}
       <div class="card"><div class="row"><h2 class="grow" style="margin:0">รายชื่อนิสิต ${list.length} คน</h2>
         <span class="chip ${bound===list.length&&list.length?'ok':'warn'}">ผูกเครื่องแล้ว ${bound} / ${list.length} คน</span>
-        <button class="btn" id="imp">นำเข้ารายชื่อ</button><button class="btn" id="enrollSt" ${list.length&&url?'':'disabled'}>โหมดลงทะเบียนในห้อง</button><button class="btn" id="expLinks" ${list.length&&url?'':'disabled'}>ส่งออกลิงก์ลงทะเบียน (CSV)</button></div>
+        <button class="btn" id="imp">นำเข้ารายชื่อ</button><button class="btn" id="enrollSt" ${list.length&&url?'':'disabled'}>โหมดลงทะเบียนในห้อง</button><button class="btn pri" id="invMail" ${list.length&&url?'':'disabled'}>✉ ส่งลิงก์ลงทะเบียนทางอีเมล</button><button class="btn" id="expLinks" ${list.length&&url?'':'disabled'}>ส่งออกลิงก์ (CSV)</button></div>
         <div class="row" style="margin:12px 0"><input type="text" id="q" placeholder="ค้นหารหัส/ชื่อ" value="${esc(V.q)}" style="max-width:280px"></div>
-        ${list.length ? `<div class="tablewrap"><table class="t"><thead><tr><th class="num">ที่</th><th>รหัสนิสิต</th><th>ชื่อ-สกุล</th><th>กลุ่ม</th><th>อีเมล</th><th>เครื่องที่ผูก</th><th class="c">ชุดลิงก์ที่</th><th></th></tr></thead><tbody>
+        ${list.length ? `<div class="tablewrap"><table class="t"><thead><tr><th class="num">ที่</th><th>รหัสนิสิต</th><th>ชื่อ-สกุล</th><th>กลุ่ม</th><th>อีเมล</th><th>เครื่องที่ผูก</th><th>ส่งลิงก์ทางอีเมล</th><th class="c">ชุดลิงก์ที่</th><th></th></tr></thead><tbody>
         ${list.filter(s => !V.q || (s.sid+' '+s.name).toLowerCase().includes(V.q.toLowerCase())).map((s,i) => `<tr><td class="num">${i+1}</td><td class="mono">${esc(s.sid)}</td><td>${esc(s.name)}</td><td>${esc(s.group||'')}</td><td class="small">${esc(s.email||'')}</td>
-          <td>${s.dev ? `<span class="chip ok">••${esc(s.dev.slice(-4).toUpperCase())}</span> <span class="small muted">${fmtDateTime(s.devAt)}</span>` : '<span class="chip">ยังไม่ผูก</span>'}</td><td class="c">${s.ver}</td>
+          <td>${s.dev ? `<span class="chip ok">••${esc(s.dev.slice(-4).toUpperCase())}</span> <span class="small muted">${s.devAt ? fmtDateTime(s.devAt) : ''}</span>` : '<span class="chip">ยังไม่ผูก</span>'}</td><td class="small nowrap">${s.invAt && s.invVer === s.ver ? `<span class="chip info">ส่งแล้ว</span> ${fmtDateTime(s.invAt)}` : (s.email ? '<span class="muted">ยังไม่ส่ง</span>' : '<span class="muted">ไม่มีอีเมล</span>')}</td><td class="c">${s.ver}</td>
           <td class="nowrap"><button class="btn sm" data-eq="${esc(s.sid)}" ${url?'':'disabled'}>QR ลงทะเบียน</button> <button class="btn sm" data-more="${esc(s.sid)}">จัดการ…</button></td></tr>`).join('')}
         </tbody></table></div>` : `<div class="empty">ยังไม่มีรายชื่อ กด “นำเข้ารายชื่อ”</div>`}
       </div>
       <div class="card"><h3>การผูกเครื่องทำงานอย่างไร</h3><ol style="margin:0;padding-left:20px">
-        <li>นิสิตเปิด<b>ลิงก์/QR ลงทะเบียน</b>ของตนเองบนมือถือ (แนะนำทำในห้องเรียนครั้งแรก โดยอาจารย์ดูบัตรนิสิต — ใช้ “โหมดลงทะเบียนในห้อง”)</li>
+        <li>ส่ง<b>ลิงก์ลงทะเบียน</b>ไปที่อีเมลมหาวิทยาลัยของนิสิตทุกคนในคลิกเดียว (“✉ ส่งลิงก์ลงทะเบียนทางอีเมล”) นิสิตเปิดอีเมลบนมือถือแล้วกดลิงก์ — นิสิตที่มีปัญหาใช้ “โหมดลงทะเบียนในห้อง” เป็นรายคน</li>
         <li>เมื่อสแกนเช็คชื่อ<b>ครั้งแรก</b> ระบบจะผูกรหัสเครื่องนั้นกับนิสิต ครั้งต่อไปต้องใช้เครื่องเดิม</li>
         <li>มือถือเครื่องหนึ่งใช้ได้กับนิสิต <b>1 คน</b> หากพบเครื่องเดียวสแกนให้หลายคนจะถูกปฏิเสธและบันทึกหลักฐาน</li>
         <li>นิสิตเปลี่ยนมือถือ/ล้างข้อมูลเบราว์เซอร์ → กด “จัดการ… → ออกลิงก์ใหม่” แล้วให้ลงทะเบียนใหม่ ลิงก์เดิมจะใช้ไม่ได้ทันที</li></ol></div>`;
@@ -947,6 +983,7 @@ const Admin = {
       list.forEach(s => rows.push([s.sid, s.name, s.group||'', s.email||'', url + '#e=' + Proto.enrollToken(crs, s)]));
       download(`ลิงก์ลงทะเบียน_${safeName(crs.code)}.csv`, toCSV(rows), 'text/csv;charset=utf-8'); };
     if ($('#enrollSt')) $('#enrollSt').onclick = () => this.enrollStation(list[0].sid);
+    if ($('#invMail')) $('#invMail').onclick = () => this.inviteForm();
     $$('[data-eq]').forEach(b => b.onclick = () => this.enrollStation(b.dataset.eq, true));
     $$('[data-more]').forEach(b => b.onclick = () => this.studentMenu(S.students.find(s => s.id === crs.id+'|'+b.dataset.more)));
   },
@@ -980,12 +1017,47 @@ const Admin = {
       <div class="field"><label>อีเมล</label><input type="text" id="sm_email" value="${esc(s.email||'')}"></div>
       <div class="field"><label>เครื่องที่ผูก</label><div>${s.dev ? `••${esc(s.dev.slice(-4).toUpperCase())} (ผูกเมื่อ ${fmtDateTime(s.devAt)})` : 'ยังไม่ผูก'}</div></div>
       <div class="notice info small"><b>ปลดเครื่อง</b> — ให้สแกนครั้งถัดไปผูกเครื่องใหม่ได้ (ลิงก์เดิมยังใช้ได้)<br><b>ออกลิงก์ใหม่</b> — ยกเลิก QR/ลิงก์เดิมทั้งหมดและปลดเครื่อง ใช้เมื่อนิสิตเปลี่ยนมือถือหรือสงสัยว่าลิงก์รั่วไหล</div>
-      <div class="actions"><button class="btn danger" data-del>ลบนิสิต</button><span class="spacer"></span><button class="btn" data-unbind ${s.dev?'':'disabled'}>ปลดเครื่อง</button><button class="btn" data-rev>ออกลิงก์ใหม่</button><button class="btn pri" data-save>บันทึก</button></div>`);
+      <div class="actions"><button class="btn danger" data-del>ลบนิสิต</button><span class="spacer"></span><button class="btn" data-unbind ${s.dev?'':'disabled'}>ปลดเครื่อง</button><button class="btn" data-rev>ออกลิงก์ใหม่</button>${S.meta.gasUrl && s.email ? '<button class="btn" data-inv>✉ ส่งลิงก์ทางอีเมล</button>' : ''}<button class="btn pri" data-save>บันทึก</button></div>`);
     const done = async () => { await DB.put('students', s); closeModal(); this.render(); };
     $('[data-save]',m).onclick = () => { s.name = $('#sm_name').value.trim() || s.name; s.group = $('#sm_group').value.trim(); s.email = $('#sm_email').value.trim(); done(); };
     $('[data-unbind]',m).onclick = () => { s.dev = null; s.devAt = null; done(); };
+    if ($('[data-inv]',m)) $('[data-inv]',m).onclick = async () => { const b = $('[data-inv]',m); b.disabled = true; b.textContent = 'กำลังส่ง…';
+      const r = await Mailer.invite(course(), [s]); closeModal(); this.render();
+      toast(r.sent ? `ส่งลิงก์ลงทะเบียนถึง ${esc(s.email)} แล้ว${r.unconfirmed ? ' (ยืนยันผลไม่ได้ — ตรวจในกล่อง “ส่งแล้ว” ของ Gmail)' : ''}` : `ส่งไม่สำเร็จ: ${esc(r.failed[0]?.error || '')}`); };
     $('[data-rev]',m).onclick = async () => { if (!confirm('ยกเลิกลิงก์/QR เดิมของนิสิตคนนี้ และออกลิงก์ใหม่?')) return; s.ver = (s.ver||1) + 1; s.dev = null; s.devAt = null; await done(); this.enrollStation(s.sid, true); };
     $('[data-del]',m).onclick = async () => { if (!confirm(`ลบ ${s.name} ออกจากรายวิชา? (ข้อมูลการเช็คชื่อเดิมยังอยู่ในไฟล์สำรอง)`)) return; await DB.del('students', s.id); S.students = S.students.filter(x=>x.id!==s.id); closeModal(); this.render(); };
+  },
+  inviteForm(){
+    const crs = course(), list = studentsOf(crs.id);
+    if (!S.meta.gasUrl){ const m = modal(`<h2>ยังไม่ได้ตั้งค่าการส่งอีเมล</h2><p>การส่งลิงก์ทางอีเมลใช้ Google Apps Script ตัวเดียวกับอีเมลแจ้งเตือน กรุณาติดตั้งและใส่ URL ที่แท็บ “ตั้งค่า → อีเมลแจ้งเตือน” ก่อน</p><div class="actions"><button class="btn" data-x>ปิด</button><button class="btn pri" data-s>ไปที่ตั้งค่า</button></div>`);
+      $('[data-x]',m).onclick = closeModal; $('[data-s]',m).onclick = () => { closeModal(); V.tab = 'settings'; this.render(); }; return; }
+    const unbound = list.filter(s => !s.dev), noMail = unbound.filter(s => !s.email), sentBefore = unbound.filter(s => s.email && s.invAt && s.invVer === s.ver);
+    const m = modal(`<h2>ส่งลิงก์ลงทะเบียนทางอีเมล</h2>
+      <div class="stats" style="margin-top:0">
+        <div class="stat"><b>${unbound.length}</b><span>ยังไม่ผูกเครื่อง (คน)</span></div>
+        <div class="stat"><b>${sentBefore.length}</b><span>เคยส่งลิงก์แล้ว (คน)</span></div>
+        <div class="stat"><b style="${noMail.length?'color:var(--err)':''}">${noMail.length}</b><span>ไม่มีอีเมลในรายชื่อ (คน)</span></div></div>
+      <label class="row" style="gap:8px;margin:6px 0"><input type="checkbox" id="iv_again"> ส่งซ้ำให้คนที่เคยส่งแล้ว (ใช้เมื่อนิสิตแจ้งว่าไม่ได้รับ)</label>
+      <p id="iv_n" style="font-weight:600;margin:8px 0"></p>
+      <div class="notice info small" style="margin-top:0">ส่งเฉพาะนิสิตที่<b>ยังไม่ผูกเครื่อง</b> ผู้ที่ผูกเครื่องแล้วจะไม่ได้รับซ้ำ · ลิงก์ของแต่ละคนไม่เหมือนกัน · โควตา Google Workspace ประมาณ 1,500 ผู้รับต่อวัน</div>
+      <details><summary class="muted small" style="cursor:pointer">แก้ไขข้อความอีเมล</summary>
+        <div class="field"><label>หัวเรื่อง</label><input type="text" id="iv_subj" value="${esc(crs.invSubj || INV_SUBJ)}"></div>
+        <div class="field"><label>ข้อความ</label><textarea id="iv_body" style="min-height:260px">${esc(crs.invBody || INV_BODY)}</textarea><div class="hint">ตัวแปร: {ชื่อ} {รหัสนิสิต} {รหัสวิชา} {รายวิชา} {ลิงก์} — ต้องมี {ลิงก์}</div></div></details>
+      <div id="iv_prog" class="small muted" style="min-height:20px;margin-top:8px"></div>
+      <div class="actions"><button class="btn" data-c>ยกเลิก</button><button class="btn pri" data-o>ส่งอีเมล</button></div>`, 'wide');
+    const targets = () => unbound.filter(s => s.email && ($('#iv_again').checked || !(s.invAt && s.invVer === s.ver)));
+    const upd = () => { const n = targets().length; $('#iv_n').textContent = n ? `จะส่งอีเมล ${n} ฉบับ` : 'ไม่มีผู้ที่ต้องส่ง'; $('[data-o]',m).disabled = !n; };
+    $('#iv_again').onchange = upd; upd();
+    $('[data-c]',m).onclick = closeModal;
+    $('[data-o]',m).onclick = async () => {
+      const body = $('#iv_body').value; if (!body.includes('{ลิงก์}')) return alert('ข้อความต้องมี {ลิงก์}');
+      crs.invSubj = $('#iv_subj').value; crs.invBody = body; await DB.put('courses', crs);
+      const tg = targets(); if (!confirm(`ยืนยันส่งลิงก์ลงทะเบียนทางอีเมล ${tg.length} ฉบับ?`)) return;
+      $('[data-o]',m).disabled = true; $('[data-c]',m).disabled = true;
+      const r = await Mailer.invite(crs, tg, (d, t) => { const p = $('#iv_prog'); if (p) p.textContent = `กำลังส่ง… ${d} / ${t} ฉบับ`; });
+      closeModal(); this.render();
+      toast(`ส่งลิงก์ลงทะเบียนสำเร็จ ${r.sent} ฉบับ${r.failed.length ? `<br><span style="color:var(--err)">ไม่สำเร็จ ${r.failed.length} ฉบับ: ${r.failed.slice(0,5).map(f=>esc(f.to)).join(', ')}${r.failed.length>5?' …':''}</span>` : ''}${r.unconfirmed ? '<br>เบราว์เซอร์ยืนยันผลไม่ได้ — ตรวจในกล่อง “ส่งแล้ว” ของ Gmail' : ''}${noMail.length ? `<br>ไม่มีอีเมล ${noMail.length} คน — ใช้ “QR ลงทะเบียน” เป็นรายคน` : ''}`);
+    };
   },
   importStudents(){
     const crs = course();
